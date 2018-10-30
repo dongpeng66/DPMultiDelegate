@@ -68,5 +68,177 @@ if ([delegate respondsToSelector:@selector(<#方法名#>:)]) {
 
 ## 具体实现
 
+### 1. 定义多代理转发类
 
+这个类用来封装多代理实现，我们使用NSProxy子类来实现它：
 
+```
+@interface DPMulitiDelegate : NSProxy
+/**
+ 创建
+ @return DPMulitiDelegate对象
+ */
++ (instancetype)share;
+/**
+ 添加代理
+ */
+- (void)addDelegate:(id)delegate;
+/**
+ 移除代理
+ */
+- (void)removeDelete:(id)delegate;
+@end
+```
+
+### 2. 处理多线程同步问题
+
+使用信号量解决多线程集合对象的同步问题:
+```
+@interface DPMulitiDelegate ()
+@property (nonatomic,strong) dispatch_semaphore_t semaphore;
+@property (nonatomic,strong) NSHashTable *delegates;;
+@end
+@implementation DPMulitiDelegate
+//初始化
++(id)alloc{
+    DPMulitiDelegate *instance=[super alloc];
+    if (instance) {
+        instance.semaphore=dispatch_semaphore_create(1);
+        instance.delegates=[NSHashTable weakObjectsHashTable];
+    }
+    return instance;
+}
++(instancetype)share{
+    return [DPMulitiDelegate alloc];
+}
+//添加代理
+-(void)addDelegate:(id)delegate{
+    dispatch_semaphore_wait(_semaphore, DISPATCH_TIME_FOREVER);
+    [_delegates addObject:delegate];
+    dispatch_semaphore_signal(_semaphore);
+}
+//移除代理
+-(void)removeDelete:(id)delegate{
+    dispatch_semaphore_wait(_semaphore, DISPATCH_TIME_FOREVER);
+    [_delegates removeObject:delegate];
+    dispatch_semaphore_signal(_semaphore);
+}
+//消息转发
+#pragma mark-消息转发
+- (NSMethodSignature *)methodSignatureForSelector:(SEL)selector{
+    dispatch_semaphore_wait(_semaphore, DISPATCH_TIME_FOREVER);
+    NSMethodSignature *methodSignature;
+    for (id delegate in _delegates) {
+        if ([delegate respondsToSelector:selector]) {
+            methodSignature = [delegate methodSignatureForSelector:selector];
+            break;
+        }
+    }
+    dispatch_semaphore_signal(_semaphore);
+    dispatch_semaphore_signal(_semaphore);
+    if (methodSignature) {
+        return methodSignature;
+    }
+    //未找到方法时，返回默认方法"-(void)method",防止崩溃
+    return [NSMethodSignature signatureWithObjCTypes:"v@:"];
+}
+-(void)forwardInvocation:(NSInvocation *)invocation{
+    dispatch_semaphore_wait(_semaphore, DISPATCH_TIME_FOREVER);
+    // 为了避免造成递归死锁，copy一份delegates而不是直接用信号量将for循环包裹
+    
+    NSHashTable *copyDelegates = [_delegates copy];
+    
+    dispatch_semaphore_signal(_semaphore);
+    
+    SEL selector = invocation.selector;
+    for (id delegate in copyDelegates) {
+        if ([delegate respondsToSelector:selector]) {
+            // 异步调用时，拷贝一个Invocation，以免意外修改target导致crash
+            NSInvocation *dupInvocation = [self copyInvocation:invocation];
+            dupInvocation.target = delegate;
+            // 异步调用多代理方法，以免响应不及时
+            dispatch_async(dispatch_get_global_queue(0, 0), ^{
+                [dupInvocation invoke];
+            });
+        }
+    }
+}
+- (NSInvocation *)copyInvocation:(NSInvocation *)invocation {
+    SEL selector = invocation.selector;
+    NSMethodSignature *methodSignature = invocation.methodSignature;
+    NSInvocation *copyInvocation = [NSInvocation invocationWithMethodSignature:methodSignature];
+    copyInvocation.selector = selector;
+    
+    NSUInteger count = methodSignature.numberOfArguments;
+    for (NSUInteger i = 2; i < count; i++) {
+        void *value;
+        [invocation getArgument:&value atIndex:i];
+        [copyInvocation setArgument:&value atIndex:i];
+    }
+    [copyInvocation retainArguments];
+    return copyInvocation;
+}
+@end
+```
+### 简单使用，例如用来更换皮肤
+```
+@interface DPThemesManager()
+
+/// 多播代理
+@property ( nonatomic, strong ) DPMulitiDelegate *delegateProxy;
+
+@end
+@implementation DPThemesManager
+@synthesize themesColor = _themesColor;
+static DPThemesManager *_manager = nil;
++ (instancetype)sharedManager{
+    return [[self alloc]init];
+}
+
++ (instancetype)allocWithZone:(struct _NSZone *)zone{
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        if (_manager == nil) {
+            _manager = [super allocWithZone:zone];
+        }
+    });
+    return _manager;
+}
+- (nonnull id)copyWithZone:(nullable NSZone *)zone {
+    return _manager;
+}
+
+- (nonnull id)mutableCopyWithZone:(nullable NSZone *)zone {
+    return _manager;
+}
+
+- (DPMulitiDelegate *)delegateProxy{
+    if (!_delegateProxy) {
+        _delegateProxy = [DPMulitiDelegate share];
+    }
+    return _delegateProxy;
+}
+
+- (void)addDelegate:(id<DPThemesManagerDelegate>)delegate {
+    [self.delegateProxy addDelegate:delegate];
+}
+
+- (void)removeDelegate:(id<DPThemesManagerDelegate>)delegate {
+    [self.delegateProxy removeDelete:delegate];
+}
+
+- (void)setThemesColor:(UIColor *)themesColor{
+    _themesColor = [themesColor copy];
+    [(id<DPThemesManagerDelegate>)self.delegateProxy themesColorChanged:_themesColor];
+}
+
+- (UIColor *)themesColor{
+    if (!_themesColor) {
+        // 默认颜色
+        _themesColor = [UIColor colorWithWhite:0.8f alpha:1.f];
+    }
+    return _themesColor;
+}
+
+@end
+```

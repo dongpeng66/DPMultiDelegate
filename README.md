@@ -21,7 +21,7 @@
 
 ## 二.多播代理
 C#中有一种委托形式称作多播委托，会顺序执行多个委托对象的对应函数。 OC中系统并没有提供类似的类型让我们使用，所以需要自己实现类似的功能。
-
+![图片名称](https://github.com/dongpeng66/DPMultiDelegate/blob/master/1.png)
 
 
 

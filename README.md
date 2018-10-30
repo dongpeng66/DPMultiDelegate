@@ -23,6 +23,10 @@
 C#中有一种委托形式称作多播委托，会顺序执行多个委托对象的对应函数。 OC中系统并没有提供类似的类型让我们使用，所以需要自己实现类似的功能。
 </br>
 ![图片名称](https://github.com/dongpeng66/DPMultiDelegate/blob/master/1.png)
-
+|                |多播代理                         |通知                         |
+|----------------|-------------------------------|-----------------------------|
+|接收范围|`定点投放，只有已添加的代理可以接收到消息`            |'Isn't this fun?'            |
+|Quotes          |`"Isn't this fun?"`            |"Isn't this fun?"            |
+|Dashes          |`-- is en-dash, --- is em-dash`|-- is en-dash, --- is em-dash|
 
 
